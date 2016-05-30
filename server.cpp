@@ -27,7 +27,6 @@ public:
 
 	Server() {
 	}
-	;
 
 	Server(string mountPoint, int packetLoss, Network *network) {
 		this->mountPoint = mountPoint;
@@ -59,14 +58,21 @@ private:
 	int packetLoss;
 	Network *network;
 	map<string, map<uint8_t, int> > transactionIdPerClient;
+	map<uint8_t, string> fileNamePerFileDescriptor;
 	uint8_t transactionId;
 
 	uint8_t beginTransaction(string clientId, string fileName) {
 
-		int fd = open((this->getMountPoint() + "//" + fileName).c_str(),
-				O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
+		string uncommittedFileName = this->getUncommittedFileName(
+				this->transactionId, clientId);
+		string uncommittedFileNameAbsolute = this->getAbsolutePath(
+				uncommittedFileName);
+
+		int fd = open(uncommittedFileNameAbsolute.c_str(), O_WRONLY | O_CREAT,
+				S_IRUSR | S_IWUSR);
 
 		transactionIdPerClient[clientId][this->transactionId] = fd;
+		fileNamePerFileDescriptor[fd] = fileName;
 
 		BeginTransactionResponseEvent *beginTransactionEvent =
 				new BeginTransactionResponseEvent(clientId, this->getServerId(),
@@ -145,8 +151,7 @@ private:
 				break;
 
 			case EVENT_TYPE_COMMIT:
-				this->finishCommit(
-						((CommitEvent *) event)->getTransactionId(),
+				this->finishCommit(((CommitEvent *) event)->getTransactionId(),
 						((CommitEvent *) event)->getSenderNodeId());
 				break;
 			default:
@@ -180,7 +185,6 @@ private:
 
 			this->network->sendPacket(event);
 
-
 		}
 
 	}
@@ -190,7 +194,41 @@ private:
 	}
 
 	uint8_t commitTransaction(uint8_t transactionId, string clientId) {
-		return NormalReturn;
+
+		int fd = this->transactionIdPerClient[clientId][transactionId];
+
+		int closeStatus = close(fd);
+
+		if (closeStatus != 0)
+			return ErrorReturn;
+
+		string absoluteFileName = this->getAbsolutePath(
+				fileNamePerFileDescriptor[fd]);
+		string absoluteUncommittedFileName = this->getAbsolutePath(
+				this->getUncommittedFileName(transactionId, clientId));
+
+		int renameStatus = rename(absoluteUncommittedFileName.c_str(),
+				absoluteFileName.c_str());
+
+		if (renameStatus == 0)
+			return NormalReturn;
+		else
+			return ErrorReturn;
+
+	}
+
+	string getUncommittedFileName(uint8_t transactionId, string clientId) {
+
+		ostringstream ss;
+		ss << ".unstaged" << (int) transactionId << "file";
+		string uncommitedFileName = ss.str();
+
+		return uncommitedFileName;
+	}
+
+	string getAbsolutePath(string relativeFileName) {
+
+		return this->getMountPoint() + "//" + relativeFileName.c_str();
 
 	}
 };
