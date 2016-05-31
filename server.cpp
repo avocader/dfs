@@ -289,15 +289,10 @@ private:
 
 	void copyContent(string destFileName, string sourceFileName) {
 
-		ifstream sourceFile(sourceFileName.c_str());
-		ofstream destFile(destFileName.c_str());
-		string line;
+		ifstream sourceFile(sourceFileName.c_str(), std::ios::binary);
+		ofstream destFile(destFileName.c_str(), std::ios::binary);
 
-		if (destFile.is_open()) {
-			while (getline(sourceFile, line)) {
-				destFile << line << endl;
-			}
-		}
+		destFile << sourceFile.rdbuf();
 
 		destFile.close();
 		sourceFile.close();
