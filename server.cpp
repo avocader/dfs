@@ -8,17 +8,20 @@
 #define DEBUG
 
 #include <stdio.h>
-#include <getopt.h>
 
 #include <server.h>
 #include <unistd.h>
 #include <fcntl.h>
 
 #include <iostream>
+#include <fstream>
+
 #include <map>
 
 #include <string.h>
 #include <sstream>
+
+#include <sys/stat.h>
 
 /* ------------------------------------------------------------------ */
 
@@ -36,6 +39,8 @@ public:
 
 	void runServer() {
 
+		this->prepareLocalFileSystem();
+
 		while (1) {
 
 			char body[256] = { };
@@ -46,6 +51,18 @@ public:
 			}
 		}
 
+	}
+
+	void prepareLocalFileSystem() {
+		struct stat sb;
+
+		if (stat(this->mountPoint.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)) {
+
+			exitError("machine already in use");
+
+		}
+
+		int createStatus = mkdir(this->mountPoint.c_str(), S_IRWXU | S_IRWXG);
 	}
 
 	string getMountPoint() {
@@ -71,6 +88,8 @@ private:
 		int fd = open(uncommittedFileNameAbsolute.c_str(), O_WRONLY | O_CREAT,
 				S_IRUSR | S_IWUSR);
 
+		this->copyContent(uncommittedFileNameAbsolute, this->getAbsolutePath(fileName));
+
 		transactionIdPerClient[clientId][this->transactionId] = fd;
 		fileNamePerFileDescriptor[fd] = fileName;
 
@@ -86,7 +105,7 @@ private:
 			uint8_t offset, uint8_t blockSize, char* bytes) {
 
 		int fd = this->transactionIdPerClient[clientId][tranId];
-		printf("Writing block to file descriptor: %d\n", fd);
+		//printf("Writing block to file descriptor: %d\n", fd);
 
 		if (lseek(fd, offset, SEEK_SET) < 0) {
 			perror("WriteBlock Seek");
@@ -156,10 +175,10 @@ private:
 
 			case EVENT_TYPE_COMMIT:
 				this->finishCommit(((CommitEvent *) event)->getTransactionId(),
-						((CommitEvent *) event)->getSenderNodeId());
+						((CommitEvent *) event)->getSenderNodeId(),
+						((CommitEvent *) event)->getCloseFile());
 				break;
 			default:
-				printf("Ignoring event: %d\n", eventType);
 				break;
 			};
 		} else {
@@ -177,10 +196,12 @@ private:
 
 	}
 
-	void finishCommit(uint8_t transactionId, string clientId) {
+	void finishCommit(uint8_t transactionId, string clientId, bool closeFile) {
 
-		int commitTransactionStatus = commitTransaction(transactionId,
-				clientId);
+		printf("FINISH COMMIT..., close file:%d\n", closeFile);
+
+		int commitTransactionStatus = commitTransaction(transactionId, clientId,
+				closeFile);
 
 		if (commitTransactionStatus == NormalReturn) {
 
@@ -189,6 +210,10 @@ private:
 
 			this->network->sendPacket(event);
 
+			printf("FINISH COMMIT...DONE\n");
+
+		} else {
+			printf("Unable to finish commit\n");
 		}
 
 	}
@@ -197,28 +222,34 @@ private:
 		return POSITIVE_VOTE;
 	}
 
-	uint8_t commitTransaction(uint8_t transactionId, string clientId) {
+	uint8_t commitTransaction(uint8_t transactionId, string clientId,
+			bool closeFile) {
+
+		//transactionIdPerClient[clientId][this->transactionId] = fd;
+		//fileNamePerFileDescriptor[fd] = fileName;
 
 		int fd = this->transactionIdPerClient[clientId][transactionId];
 
-		int closeStatus = close(fd);
+		//Close file descriptor
+		if (closeFile) {
+			int closeStatus = close(fd);
 
-		if (closeStatus != 0)
-			return ErrorReturn;
+			if (closeStatus != 0) {
+				printf("Unable to close file, probably already closed\n");
+				return ErrorReturn;
+			}
+		}
 
+		//Flush changes to filesystem
 		string absoluteFileName = this->getAbsolutePath(
 				fileNamePerFileDescriptor[fd]);
 		string absoluteUncommittedFileName = this->getAbsolutePath(
 				this->getUncommittedFileName(transactionId, clientId));
 
-		int renameStatus = rename(absoluteUncommittedFileName.c_str(),
-				absoluteFileName.c_str());
 
-		if (renameStatus == 0)
-			return NormalReturn;
-		else
-			return ErrorReturn;
+		this->copyContent(absoluteFileName, absoluteUncommittedFileName);
 
+		return NormalReturn;
 	}
 
 	string getUncommittedFileName(uint8_t transactionId, string clientId) {
@@ -233,6 +264,23 @@ private:
 	string getAbsolutePath(string relativeFileName) {
 
 		return this->getMountPoint() + "//" + relativeFileName.c_str();
+
+	}
+
+	void copyContent(string destFileName, string sourceFileName) {
+
+		ifstream sourceFile(sourceFileName.c_str());
+		ofstream destFile (destFileName.c_str());
+		string line;
+
+		if (destFile.is_open()) {
+			while (getline(sourceFile, line)) {
+				destFile << line << endl;
+			}
+		}
+
+		destFile.close();
+		sourceFile.close();
 
 	}
 };

@@ -296,8 +296,6 @@ public:
 	CommitRequestEvent(string clientId, string serverId,
 			uint8_t transactionId) {
 
-		printf("Creating commit request event\n");
-
 		this->eventType = EVENT_TYPE_COMMIT_REQUEST;
 		this->senderNodeId = clientId;
 		this->receiverNodeId = serverId;
@@ -423,14 +421,16 @@ public:
 		int serverIdLength = packet->body[3 + clientIdLength];
 		this->receiverNodeId = string(packet->body + 4 + clientIdLength,
 				serverIdLength);
+		this->closeFile = packet->body[4 + clientIdLength + serverIdLength];
 	}
 
-	CommitEvent(string clientId, string serverId, uint8_t transactionId) {
+	CommitEvent(string clientId, string serverId, uint8_t transactionId, uint8_t closeFile) {
 
 		this->eventType = EVENT_TYPE_COMMIT;
 		this->senderNodeId = clientId;
 		this->receiverNodeId = serverId;
 		this->transactionId = transactionId;
+		this->closeFile = closeFile;
 
 	}
 
@@ -452,8 +452,10 @@ public:
 		//Server id
 		strcpy(pack->body + 4 + this->senderNodeId.length(),
 				this->receiverNodeId.c_str());
+		//Close file
+		pack->body[4 + this->senderNodeId.length() + this->receiverNodeId.length()] = this->closeFile;
 
-		pack->len = 4 + this->senderNodeId.length()
+		pack->len = 5 + this->senderNodeId.length()
 				+ this->receiverNodeId.length();
 
 		return pack;
@@ -463,8 +465,13 @@ public:
 		return this->transactionId;
 	}
 
+	uint8_t getCloseFile() {
+		return this->closeFile;
+	}
+
 protected:
 	uint8_t transactionId;
+	uint8_t closeFile;
 
 };
 
@@ -546,8 +553,6 @@ public:
 
 	void netInit() {
 
-		printf("Initializing network\n");
-
 		struct ip_mreq mreq;
 		this->s = socket(AF_INET, SOCK_DGRAM, 0);
 		if (this->s < 0)
@@ -583,8 +588,6 @@ public:
 
 		memcpy(&groupAddr, &nullAddr, sizeof(struct sockaddr_in));
 		groupAddr.sin_addr.s_addr = htonl(DFSGROUP);
-
-		printf("Network initialized\n");
 
 	}
 

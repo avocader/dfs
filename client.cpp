@@ -89,14 +89,14 @@ public:
 		return this->numServers;
 	}
 
-	int commit(int fd) {
+	int commit(int fd, bool closeFile) {
 
 		int commitRequestStatus = this->prepareCommit(fd);
 
 		if (commitRequestStatus == NormalReturn) {
 
 			printf("Vote OK\n");
-			int finishCommitStatus = this->finishCommit(fd);
+			int finishCommitStatus = this->finishCommit(fd, closeFile);
 
 			return finishCommitStatus;
 
@@ -126,8 +126,6 @@ public:
 					this->getClientId(), 1, commitRequestEvent,
 					EVENT_TYPE_COMMIT_VOTE);
 
-			printf("Adding number of packets : %d\n", packetsPerServer.size());
-
 			packets.merge(packetsPerServer);
 
 		}
@@ -155,7 +153,7 @@ public:
 		return NormalReturn;
 	}
 
-	int finishCommit(int fd) {
+	int finishCommit(int fd, bool closeFile) {
 
 		map<string, uint8_t>::iterator it;
 
@@ -165,7 +163,7 @@ public:
 				it != transactionsPerServersPerFd[fd].end(); it++) {
 
 			CommitEvent *commitEvent = new CommitEvent(this->getClientId(),
-					it->first, it->second);
+					it->first, it->second, closeFile);
 
 			list<DfsPacket*> packetsPerServer = this->network->sendPacketRetry(
 					this->getClientId(), 1, commitEvent,
@@ -202,7 +200,7 @@ static Client *c;
 
 int InitReplFs(unsigned short portNum, int packetLoss, int numServers) {
 #ifdef DEBUG
-	printf("InitReplFs: Port number %d, packet loss %d percent, %d servers\n",
+	printf("INITREPLFS: Port number %d, packet loss %d percent, %d servers\n",
 			portNum, packetLoss, numServers);
 #endif
 
@@ -225,7 +223,7 @@ int OpenFile(char * fileName) {
 	ASSERT(fileName);
 
 #ifdef DEBUG
-	printf("OpenFile: Opening File '%s'\n", fileName);
+	printf("OPENFILE: Opening File '%s'\n", fileName);
 #endif
 
 	int fd = c->beginTransaction(fileName);
@@ -250,7 +248,7 @@ int WriteBlock(int fd, char * buffer, int byteOffset, int blockSize) {
 	ASSERT( blockSize >= 0 && blockSize < MaxBlockLength);
 
 #ifdef DEBUG
-	printf("WriteBlock: Writing FD=%d, Offset=%d, Length=%d\n", fd, byteOffset,
+	printf("WRITEBLOCK: Writing FD=%d, Offset=%d, Length=%d\n", fd, byteOffset,
 			blockSize);
 #endif
 
@@ -266,7 +264,7 @@ int Commit(int fd) {
 	ASSERT( fd >= 0);
 
 #ifdef DEBUG
-	printf("Commit: FD=%d\n", fd);
+	printf("COMMIT: FD=%d\n", fd);
 #endif
 
 	/****************************************************/
@@ -278,7 +276,7 @@ int Commit(int fd) {
 	/* Commit Phase */
 	/****************/
 
-	int commitStatus = c->commit(fd);
+	int commitStatus = c->commit(fd, false);
 
 	return commitStatus;
 
@@ -290,7 +288,7 @@ int Abort(int fd) {
 	ASSERT( fd >= 0);
 
 #ifdef DEBUG
-	printf("Abort: FD=%d\n", fd);
+	printf("ABORT: FD=%d\n", fd);
 #endif
 
 	/*************************/
@@ -307,19 +305,16 @@ int CloseFile(int fd) {
 	ASSERT( fd >= 0);
 
 #ifdef DEBUG
-	printf("Close: FD=%d\n", fd);
+	printf("CLOSE: FD=%d\n", fd);
 #endif
 
 	/*****************************/
 	/* Check for Commit or Abort */
 	/*****************************/
 
-	if (close(fd) < 0) {
-		perror("Close");
-		return (ErrorReturn);
-	}
+	int commitStatus = c->commit(fd, true);
 
-	return (NormalReturn);
+	return commitStatus;
 }
 
 /* ------------------------------------------------------------------ */
