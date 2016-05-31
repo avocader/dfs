@@ -86,7 +86,7 @@ private:
 				uncommittedFileName);
 
 		int fd = open(uncommittedFileNameAbsolute.c_str(), O_WRONLY | O_CREAT,
-				S_IRUSR | S_IWUSR);
+				S_IRWXU | S_IRWXG);
 
 		this->copyContent(uncommittedFileNameAbsolute,
 				this->getAbsolutePath(fileName));
@@ -268,6 +268,8 @@ private:
 				this->getUncommittedFileName(transactionId, clientId));
 
 		this->copyContent(absoluteFileName, absoluteUncommittedFileName);
+
+		chmod(absoluteFileName.c_str(), S_IRWXU|S_IRWXG|S_IROTH);
 	}
 
 	string getUncommittedFileName(uint8_t transactionId, string clientId) {
