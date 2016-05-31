@@ -108,8 +108,12 @@ private:
 
 	string getServerId() {
 
+		char hostname[1024];
+		hostname[1023] = '\0';
+		gethostname(hostname, 1023);
+
 		std::ostringstream ss;
-		ss << ::getppid();
+		ss << ::getppid() << hostname;
 		string serverId = ss.str();
 
 		return serverId;
@@ -220,7 +224,7 @@ private:
 	string getUncommittedFileName(uint8_t transactionId, string clientId) {
 
 		ostringstream ss;
-		ss << ".unstaged" << (int) transactionId << "file";
+		ss << ".unstaged" << (int) transactionId << getServerId();
 		string uncommitedFileName = ss.str();
 
 		return uncommitedFileName;
@@ -239,15 +243,15 @@ int main(int argc, char* argv[]) {
 	unsigned short portNum;
 	int packetLoss;
 
-	for (int i =0; i < argc; i++){
-		if (strcmp(argv[i],"-port") == 0)
-			port_option = argv[i+1];
+	for (int i = 0; i < argc; i++) {
+		if (strcmp(argv[i], "-port") == 0)
+			port_option = argv[i + 1];
 
-		if (strcmp(argv[i],"-mount") == 0)
-			mount_option = argv[i+1];
+		if (strcmp(argv[i], "-mount") == 0)
+			mount_option = argv[i + 1];
 
-		if (strcmp(argv[i],"-drop") == 0)
-			drop_option = argv[i+1];
+		if (strcmp(argv[i], "-drop") == 0)
+			drop_option = argv[i + 1];
 	}
 
 	if (port_option.empty())

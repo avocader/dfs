@@ -31,8 +31,11 @@ public:
 	}
 	;
 	string getClientId() {
+		char hostname[1024];
+		hostname[1023] = '\0';
+		gethostname(hostname, 1023);
 		std::ostringstream ss;
-		ss << ::getppid();
+		ss << ::getppid()<<hostname;
 		string clientId = ss.str();
 
 		return clientId;
