@@ -239,36 +239,23 @@ int main(int argc, char* argv[]) {
 	unsigned short portNum;
 	int packetLoss;
 
-	int c;
+	for (int i =0; i < argc; i++){
+		if (strcmp(argv[i],"-port") == 0)
+			port_option = argv[i+1];
 
-	while (1) {
-		static struct option long_options[] = { { "port", required_argument, 0,
-				'p' }, { "mount", required_argument, 0, 'm' }, { "drop",
-				required_argument, 0, 'd' }, { 0, 0, 0, 0 } };
-		int option_index = 0;
+		if (strcmp(argv[i],"-mount") == 0)
+			mount_option = argv[i+1];
 
-		c = getopt_long(argc, argv, "port:mount:drop:", long_options,
-				&option_index);
-
-		if (c == -1)
-			break;
-
-		switch (c) {
-		case 'p':
-			port_option = optarg;
-			break;
-		case 'm':
-			mount_option = optarg;
-			break;
-		case 'd':
-			drop_option = optarg;
-			break;
-
-		default:
-			exitError("Cannot parse input parameters.\n");
-			break;
-		}
+		if (strcmp(argv[i],"-drop") == 0)
+			drop_option = argv[i+1];
 	}
+
+	if (port_option.empty())
+		exitError("Please provide port value");
+	if (mount_option.empty())
+		exitError("Please provide mount value");
+	if (drop_option.empty())
+		exitError("Please provide drop value");
 
 	portNum = atoi(port_option.c_str());
 	packetLoss = atoi(drop_option.c_str());
