@@ -75,37 +75,48 @@ private:
 	int packetLoss;
 	Network *network;
 	map<string, map<uint8_t, int> > transactionIdPerClient;
-	map<uint8_t, string> fileNamePerFileDescriptor;
-	uint8_t transactionId;
+	map<int, string> fileNamePerFileDescriptor;
+	uint8_t _transactionId;
 
 	uint8_t beginTransaction(string clientId, string fileName) {
 
 		string uncommittedFileName = this->getUncommittedFileName(
-				this->transactionId, clientId);
+				this->_transactionId, clientId);
 		string uncommittedFileNameAbsolute = this->getAbsolutePath(
 				uncommittedFileName);
 
 		int fd = open(uncommittedFileNameAbsolute.c_str(), O_WRONLY | O_CREAT,
 				S_IRUSR | S_IWUSR);
 
-		this->copyContent(uncommittedFileNameAbsolute, this->getAbsolutePath(fileName));
+		this->copyContent(uncommittedFileNameAbsolute,
+				this->getAbsolutePath(fileName));
 
-		transactionIdPerClient[clientId][this->transactionId] = fd;
+		transactionIdPerClient[clientId][this->_transactionId] = fd;
 		fileNamePerFileDescriptor[fd] = fileName;
 
 		BeginTransactionResponseEvent *beginTransactionEvent =
 				new BeginTransactionResponseEvent(clientId, this->getServerId(),
-						transactionId);
+						this->_transactionId);
 		this->network->sendPacket(beginTransactionEvent);
 
-		return transactionId++;
+		printf("OPENFILE: %s, fd: %d, transactionId: %d\n", fileName.c_str(),
+				fd, this->_transactionId);
+
+		return this->_transactionId++;
 	}
 
 	void writeBlock(uint8_t tranId, string clientId, string serverId,
 			uint8_t offset, uint8_t blockSize, char* bytes) {
 
+		if (this->transactionIdPerClient[clientId].count(tranId) == 0) {
+			printf("Invalid transaction, id: %d\n", tranId);
+			return;
+		}
+
 		int fd = this->transactionIdPerClient[clientId][tranId];
-		//printf("Writing block to file descriptor: %d\n", fd);
+		printf(
+				"WRITE BLOCK to file descriptor: %d, clientId: %s, transactionId: %d\n",
+				fd, clientId.c_str(), tranId);
 
 		if (lseek(fd, offset, SEEK_SET) < 0) {
 			perror("WriteBlock Seek");
@@ -146,13 +157,13 @@ private:
 				|| event->isBroadcast())
 
 				{
+
 			switch (eventType) {
 			case EVENT_TYPE_BEGIN_TRANSACTION_REQUEST:
 				uint8_t transactionId;
 				transactionId =
 						beginTransaction(event->getSenderNodeId(),
 								((BeginTransactionRequestEvent *) event)->getFileName());
-				printf("Started transactionId: %d\n", transactionId);
 				break;
 			case EVENT_TYPE_WRITE_BLOCK:
 
@@ -198,8 +209,6 @@ private:
 
 	void finishCommit(uint8_t transactionId, string clientId, bool closeFile) {
 
-		printf("FINISH COMMIT..., close file:%d\n", closeFile);
-
 		int commitTransactionStatus = commitTransaction(transactionId, clientId,
 				closeFile);
 
@@ -210,10 +219,9 @@ private:
 
 			this->network->sendPacket(event);
 
-			printf("FINISH COMMIT...DONE\n");
-
 		} else {
-			printf("Unable to finish commit\n");
+			printf("Unable to finish commit for transactionId: %d\n",
+					transactionId);
 		}
 
 	}
@@ -225,31 +233,41 @@ private:
 	uint8_t commitTransaction(uint8_t transactionId, string clientId,
 			bool closeFile) {
 
-		//transactionIdPerClient[clientId][this->transactionId] = fd;
-		//fileNamePerFileDescriptor[fd] = fileName;
+		printf("COMMIT transaction id : %d\n", transactionId);
+		if (closeFile)
+			printf("CLOSEFILE\n");
 
 		int fd = this->transactionIdPerClient[clientId][transactionId];
 
-		//Close file descriptor
 		if (closeFile) {
+			//Close file descriptor
 			int closeStatus = close(fd);
 
 			if (closeStatus != 0) {
 				printf("Unable to close file, probably already closed\n");
 				return ErrorReturn;
 			}
-		}
 
+			flushChanges(fd, transactionId, clientId);
+
+			//Delete info about transaction
+			transactionIdPerClient[clientId].erase(transactionId);
+			fileNamePerFileDescriptor.erase(fd);
+
+		} else
+			flushChanges(fd, transactionId, clientId);
+
+		return NormalReturn;
+	}
+
+	void flushChanges(int fd, uint8_t transactionId, string clientId) {
 		//Flush changes to filesystem
 		string absoluteFileName = this->getAbsolutePath(
 				fileNamePerFileDescriptor[fd]);
 		string absoluteUncommittedFileName = this->getAbsolutePath(
 				this->getUncommittedFileName(transactionId, clientId));
 
-
 		this->copyContent(absoluteFileName, absoluteUncommittedFileName);
-
-		return NormalReturn;
 	}
 
 	string getUncommittedFileName(uint8_t transactionId, string clientId) {
@@ -270,7 +288,7 @@ private:
 	void copyContent(string destFileName, string sourceFileName) {
 
 		ifstream sourceFile(sourceFileName.c_str());
-		ofstream destFile (destFileName.c_str());
+		ofstream destFile(destFileName.c_str());
 		string line;
 
 		if (destFile.is_open()) {

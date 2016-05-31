@@ -84,7 +84,7 @@ protected:
 	uint8_t eventType;
 	string senderNodeId;
 	string receiverNodeId;
-	bool broadcast;
+	bool broadcast = false;
 };
 
 class BeginTransactionRequestEvent: public BaseEvent {
