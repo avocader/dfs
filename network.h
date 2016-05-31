@@ -475,6 +475,68 @@ protected:
 
 };
 
+
+class RollbackEvent: public BaseEvent {
+public:
+	RollbackEvent() {
+	}
+
+	RollbackEvent(DfsPacket *packet) {
+
+		this->eventType = EVENT_TYPE_ROLLBACK;
+		this->transactionId = packet->body[1];
+		int clientIdLength = packet->body[2];
+		this->senderNodeId = string(packet->body + 3, clientIdLength);
+		int serverIdLength = packet->body[3 + clientIdLength];
+		this->receiverNodeId = string(packet->body + 4 + clientIdLength,
+				serverIdLength);
+	}
+
+	RollbackEvent(string clientId, string serverId, uint8_t transactionId) {
+
+		this->eventType = EVENT_TYPE_ROLLBACK;
+		this->senderNodeId = clientId;
+		this->receiverNodeId = serverId;
+		this->transactionId = transactionId;
+
+	}
+
+	virtual DfsPacket* toPacket(void) {
+
+		DfsPacket *pack = new DfsPacket();
+
+		//Event type
+		pack->body[0] = this->eventType;
+		//Transaction id
+		pack->body[1] = this->transactionId;
+		//Client id length
+		pack->body[2] = this->senderNodeId.length();
+		//Client id
+		strcpy(pack->body + 3, this->senderNodeId.c_str());
+		//Server id length
+		pack->body[3 + this->senderNodeId.length()] =
+				this->receiverNodeId.length();
+		//Server id
+		strcpy(pack->body + 4 + this->senderNodeId.length(),
+				this->receiverNodeId.c_str());
+
+		pack->len = 4 + this->senderNodeId.length()
+				+ this->receiverNodeId.length();
+
+		return pack;
+	}
+
+	uint8_t getTransactionId() {
+		return this->transactionId;
+	}
+
+
+
+protected:
+	uint8_t transactionId;
+
+};
+
 class CommitRollbackAckEvent: public BaseEvent {
 
 public:
@@ -616,6 +678,9 @@ public:
 			break;
 		case EVENT_TYPE_COMMIT_ROLLBACK_ACK:
 			event = new CommitRollbackAckEvent(packet);
+			break;
+		case EVENT_TYPE_ROLLBACK:
+			event = new RollbackEvent(packet);
 			break;
 		default:
 			printf("Unknown packet type\n");

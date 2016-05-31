@@ -183,11 +183,14 @@ private:
 						((CommitRequestEvent *) event)->getSenderNodeId());
 
 				break;
-
 			case EVENT_TYPE_COMMIT:
 				this->finishCommit(((CommitEvent *) event)->getTransactionId(),
 						((CommitEvent *) event)->getSenderNodeId(),
 						((CommitEvent *) event)->getCloseFile());
+				break;
+			case EVENT_TYPE_ROLLBACK:
+				this->rollback(((RollbackEvent *) event)->getTransactionId(),
+						((RollbackEvent *) event)->getSenderNodeId());
 				break;
 			default:
 				break;
@@ -226,6 +229,27 @@ private:
 
 	}
 
+	void rollback(uint8_t transactionId, string clientId) {
+		printf("ROLLBACK transaction id : %d\n", transactionId);
+
+		int fd = this->transactionIdPerClient[clientId][transactionId];
+
+		string uncommittedFileName = this->getUncommittedFileName(transactionId,
+				clientId);
+		string uncommittedFileNameAbsolute = this->getAbsolutePath(
+				uncommittedFileName);
+		string fileName = fileNamePerFileDescriptor[fd];
+
+		this->copyContent(uncommittedFileNameAbsolute,
+				this->getAbsolutePath(fileName));
+
+		CommitRollbackAckEvent *event = new CommitRollbackAckEvent(clientId,
+				this->getServerId(), transactionId);
+
+		this->network->sendPacket(event);
+
+	}
+
 	uint8_t validateTransaction(uint8_t transactionId, string clientId) {
 		return POSITIVE_VOTE;
 	}
@@ -247,7 +271,6 @@ private:
 				printf("Unable to close file, probably already closed\n");
 				return ErrorReturn;
 			}
-
 			flushChanges(fd, transactionId, clientId);
 
 			//Delete info about transaction
@@ -261,15 +284,17 @@ private:
 	}
 
 	void flushChanges(int fd, uint8_t transactionId, string clientId) {
+
 		//Flush changes to filesystem
 		string absoluteFileName = this->getAbsolutePath(
 				fileNamePerFileDescriptor[fd]);
 		string absoluteUncommittedFileName = this->getAbsolutePath(
 				this->getUncommittedFileName(transactionId, clientId));
 
+
 		this->copyContent(absoluteFileName, absoluteUncommittedFileName);
 
-		chmod(absoluteFileName.c_str(), S_IRWXU|S_IRWXG|S_IROTH);
+		chmod(absoluteFileName.c_str(), S_IRWXU | S_IRWXG | S_IROTH);
 	}
 
 	string getUncommittedFileName(uint8_t transactionId, string clientId) {

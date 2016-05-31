@@ -182,6 +182,25 @@ public:
 
 	int rollback(int fd) {
 
+		map<string, uint8_t>::iterator it;
+
+		list<DfsPacket*> packets;
+		int positiveVotesNumber = 0;
+
+		for (it = transactionsPerServersPerFd[fd].begin();
+				it != transactionsPerServersPerFd[fd].end(); it++) {
+
+			RollbackEvent *rollbackEvent = new RollbackEvent(
+					this->getClientId(), it->first, it->second);
+
+			list<DfsPacket*> packetsPerServer = this->network->sendPacketRetry(
+					this->getClientId(), 1, rollbackEvent,
+					EVENT_TYPE_COMMIT_ROLLBACK_ACK);
+
+			packets.merge(packetsPerServer);
+
+		}
+
 		return NormalReturn;
 
 	}
@@ -295,7 +314,9 @@ int Abort(int fd) {
 	/* Abort the transaction */
 	/*************************/
 
-	return (NormalReturn);
+	int abortStatus = c->rollback(fd);
+
+	return abortStatus;
 }
 
 /* ------------------------------------------------------------------ */
