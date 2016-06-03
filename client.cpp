@@ -29,7 +29,7 @@ public:
 		hostname[1023] = '\0';
 		gethostname(hostname, 1023);
 		std::ostringstream ss;
-		ss << ::getppid()<<hostname;
+		ss << ::getppid() << hostname;
 		string clientId = ss.str();
 
 		return clientId;
@@ -51,15 +51,22 @@ public:
 			BeginTransactionResponseEvent *event =
 					(BeginTransactionResponseEvent*) this->network->packetToEvent(
 							*iterator);
-			transactionsPerServersPerFd[fileDescriptorCounter][event->getSenderNodeId()] =
-					event->getTransactionId();
 
-			printf("Server %s opened transaction %d, file descriptor %d\n",
-					event->getSenderNodeId().c_str(), event->getTransactionId(),
-					fileDescriptorCounter);
+			if (event->getReturnCode() == RC_SUCCESS) {
+
+				transactionsPerServersPerFd[fileDescriptorCounter][event->getSenderNodeId()] =
+						event->getTransactionId();
+
+				printf("Server %s opened transaction %d, file descriptor %d\n",
+						event->getSenderNodeId().c_str(),
+						event->getTransactionId(), fileDescriptorCounter);
+				return fileDescriptorCounter++;
+			} else {
+
+				return ErrorReturn;
+
+			}
 		}
-
-		return fileDescriptorCounter++;
 
 	}
 	;
@@ -136,7 +143,8 @@ public:
 
 		}
 
-		printf("Received commit votes, number of total votes: %d, positive votes number: %d\n",
+		printf(
+				"Received commit votes, number of total votes: %d, positive votes number: %d\n",
 				packets.size(), positiveVotesNumber);
 
 		if (positiveVotesNumber < this->getNumServers()) {
@@ -261,7 +269,8 @@ int WriteBlock(int fd, char * buffer, int byteOffset, int blockSize) {
 	ASSERT( blockSize >= 0 && blockSize < MaxBlockLength);
 
 #ifdef DEBUG
-	printf("WRITEBLOCK: Writing FD=%d, Offset=%d, Length=%d\n", fd, byteOffset,blockSize);
+	printf("WRITEBLOCK: Writing FD=%d, Offset=%d, Length=%d\n", fd, byteOffset,
+			blockSize);
 #endif
 
 	bytesWritten = c->writeBlock(fd, buffer, byteOffset, blockSize);

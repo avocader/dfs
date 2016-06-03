@@ -18,14 +18,21 @@
 
 using namespace std;
 
+//Multicast group
 #define DFSGROUP	0xe0010101
+
+//Max packet length
+#define MAX_PACKET_SIZE 65507
 
 #define FILENAMESIZE 128
 
+//Timing constants
 #define TIMEOUT_READ_FROM_SOCKET_SEC 1
 #define RETRY_ATTEMPTS_TIMES 30
 #define RETRY_WAIT_SEC 1
+#define MSECONDS_TO_SLEEP_BETWEEN_PACKETS 10000
 
+//Events
 #define EVENT_TYPE_BEGIN_TRANSACTION_REQUEST 0
 #define EVENT_TYPE_BEGIN_TRANSACTION_RESPONSE 1
 #define EVENT_TYPE_WRITE_BLOCK 2
@@ -35,17 +42,16 @@ using namespace std;
 #define EVENT_TYPE_ROLLBACK 6
 #define EVENT_TYPE_COMMIT_ROLLBACK_ACK 7
 
+//Return codes
+#define RC_SUCCESS 0
+#define RC_FILE_ALREADY_OPENED 1
+
+//Commit votes
 #define NEGATIVE_VOTE 0
 #define POSITIVE_VOTE 1
 
-#define TRAN_ID_ALREADY_OPENED -1
-#define FD_ALREADY_OPENED -1
-
+//Desired probability of error in system
 #define SYSTEM_RELIABILITY 1e-6
-
-#define MSECONDS_TO_SLEEP_BETWEEN_PACKETS 10000
-
-#define MAX_PACKET_SIZE 65507
 
 void exitError(string msg) {
 	printf("%s\n", msg.c_str());
@@ -184,11 +190,12 @@ public:
 	BeginTransactionResponseEvent() {
 	}
 	BeginTransactionResponseEvent(string clientId, string serverId,
-			uint8_t transactionId) {
+			uint8_t transactionId, uint8_t returnCode) {
 		this->eventType = EVENT_TYPE_BEGIN_TRANSACTION_RESPONSE;
 		this->receiverNodeId = clientId;
 		this->senderNodeId = serverId;
 		this->transactionId = transactionId;
+		this->returnCode = returnCode;
 
 	}
 	BeginTransactionResponseEvent(DfsPacket *packet) {
@@ -199,6 +206,7 @@ public:
 		this->senderNodeId = createString(packet->body + 3 + clientIdLength,
 				serverIdLength);
 		this->transactionId = packet->body[3 + clientIdLength + serverIdLength];
+		this->returnCode = packet->body[4 + clientIdLength + serverIdLength];
 
 	}
 
@@ -221,8 +229,11 @@ public:
 		//Transaction id
 		pack->body[3 + this->receiverNodeId.length()
 				+ this->senderNodeId.length()] = this->transactionId;
+		//Return code
+		pack->body[4 + this->receiverNodeId.length()
+				+ this->senderNodeId.length()] = returnCode;
 
-		pack->len = 4 + this->receiverNodeId.length()
+		pack->len = 5 + this->receiverNodeId.length()
 				+ this->senderNodeId.length();
 
 		return pack;
@@ -232,8 +243,14 @@ public:
 		return this->transactionId;
 	}
 
+	uint8_t getReturnCode() {
+		return this->returnCode;
+	}
+
 protected:
 	uint8_t transactionId;
+	uint8_t returnCode;
+
 };
 
 class WriteBlockEvent: public BaseEvent {
@@ -243,8 +260,6 @@ public:
 	}
 
 	WriteBlockEvent(DfsPacket *packet) {
-
-
 
 		this->eventType = EVENT_TYPE_WRITE_BLOCK;
 		this->transactionId = packet->body[1];
@@ -725,8 +740,6 @@ public:
 
 	BaseEvent* packetToEvent(DfsPacket *packet) {
 
-
-
 		uint8_t eventType = packet->body[0];
 		BaseEvent *event;
 
@@ -804,42 +817,28 @@ public:
 
 			this->sendPacket(eventToSend, false, 1);
 
-
-
 			struct timeval start_time, current_time;
 			long seconds_elapsed;
 			gettimeofday(&start_time, NULL);
 
 			BaseEvent *receivedEvent;
 
-
 			while (receivedNodesIds.size() < numberOfNodesExpected) {
-
-
 
 				char body[MAX_PACKET_SIZE] = { };
 
-
 				int bytes = this->readFromSocket(body, 0);
-
-
 
 				if (bytes > 0) {
 
-
 					DfsPacket *packet = new DfsPacket(body, bytes);
 
-
-
 					receivedEvent = this->packetToEvent(packet);
-
-
 
 					if (receivedEvent->getReceiverNodeId()
 							== expectedReceiverNodeId
 							&& receivedEvent->getEventType()
 									== expectedEventType) {
-
 
 						if (receivedNodesIds.count(
 								receivedEvent->getSenderNodeId()) == 0) {
@@ -858,7 +857,6 @@ public:
 					break;
 
 			}
-
 
 			if (receivedNodesIds.size() == numberOfNodesExpected)
 				break;

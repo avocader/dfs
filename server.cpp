@@ -77,6 +77,23 @@ private:
 		string uncommittedFileNameAbsolute = this->getAbsolutePath(
 				uncommittedFileName);
 
+		BeginTransactionResponseEvent *beginTransactionEvent;
+
+		map<int, string>::iterator it;
+
+		for (it = fileNamePerFileDescriptor.begin();
+				it != fileNamePerFileDescriptor.end(); it++) {
+			if (strcmp(it->second.c_str(), fileName.c_str()) == 0){
+				printf("File %s already opened\n", fileName.c_str());
+				beginTransactionEvent = new BeginTransactionResponseEvent(
+						clientId, this->getServerId(), this->_transactionId,
+						RC_FILE_ALREADY_OPENED);
+				this->network->sendPacket(beginTransactionEvent, false, 1);
+				return;
+			}
+
+		}
+
 		int fd = open(uncommittedFileNameAbsolute.c_str(), O_WRONLY | O_CREAT,
 				S_IRWXU | S_IRWXG);
 
@@ -86,9 +103,9 @@ private:
 		transactionIdPerClient[clientId][this->_transactionId] = fd;
 		fileNamePerFileDescriptor[fd] = fileName;
 
-		BeginTransactionResponseEvent *beginTransactionEvent =
+		beginTransactionEvent =
 				new BeginTransactionResponseEvent(clientId, this->getServerId(),
-						this->_transactionId);
+						this->_transactionId, RC_SUCCESS);
 		this->network->sendPacket(beginTransactionEvent, false, 1);
 
 		printf("OPENFILE: %s, fd: %d, transactionId: %d\n", fileName.c_str(),
