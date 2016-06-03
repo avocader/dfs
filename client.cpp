@@ -78,7 +78,7 @@ public:
 				it != transactionsPerServersPerFd[fd].end(); it++) {
 			WriteBlockEvent *event = new WriteBlockEvent(this->getClientId(),
 					it->first, it->second, buffer, byteOffset, blockSize);
-			this->network->sendPacket(event);
+			this->network->sendPacket(event, true);
 		}
 
 		return blockSize;
@@ -227,7 +227,7 @@ int InitReplFs(unsigned short portNum, int packetLoss, int numServers) {
 	/* Initialize network access, local state, etc.     */
 	/****************************************************/
 
-	n = new Network(DFS_PORT, 10);
+	n = new Network(portNum, packetLoss);
 	n->netInit();
 
 	c = new Client(n, numServers);

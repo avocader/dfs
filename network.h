@@ -13,6 +13,10 @@
 #include <string>
 #include <list>
 #include <set>
+#include <cmath>
+#include <unistd.h>
+
+#include <sys/time.h>
 
 using namespace std;
 
@@ -23,7 +27,7 @@ using namespace std;
 
 #define TIMEOUT_READ_FROM_SOCKET_SEC 1
 #define RETRY_ATTEMPTS_TIMES 30
-#define CLOCKS_TIME_WAITING 100
+#define RETRY_WAIT_SEC 1
 
 #define EVENT_TYPE_BEGIN_TRANSACTION_REQUEST 0
 #define EVENT_TYPE_BEGIN_TRANSACTION_RESPONSE 1
@@ -36,6 +40,12 @@ using namespace std;
 
 #define NEGATIVE_VOTE 0
 #define POSITIVE_VOTE 1
+
+#define SYSTEM_RELIABILITY 1e-5
+
+#define MSECONDS_TO_SLEEP_BETWEEN_PACKETS 10000
+
+#define MAX_PACKET_SIZE 65507
 
 void exitError(string msg) {
 	printf("%s\n", msg.c_str());
@@ -55,7 +65,12 @@ public:
 		this->len = len;
 	}
 
-	char body[256];
+	char body[MAX_PACKET_SIZE];
+	uint8_t getLen() {
+		return this->len;
+	}
+
+public:
 	uint8_t len;
 
 };
@@ -424,7 +439,8 @@ public:
 		this->closeFile = packet->body[4 + clientIdLength + serverIdLength];
 	}
 
-	CommitEvent(string clientId, string serverId, uint8_t transactionId, uint8_t closeFile) {
+	CommitEvent(string clientId, string serverId, uint8_t transactionId,
+			uint8_t closeFile) {
 
 		this->eventType = EVENT_TYPE_COMMIT;
 		this->senderNodeId = clientId;
@@ -453,7 +469,8 @@ public:
 		strcpy(pack->body + 4 + this->senderNodeId.length(),
 				this->receiverNodeId.c_str());
 		//Close file
-		pack->body[4 + this->senderNodeId.length() + this->receiverNodeId.length()] = this->closeFile;
+		pack->body[4 + this->senderNodeId.length()
+				+ this->receiverNodeId.length()] = this->closeFile;
 
 		pack->len = 5 + this->senderNodeId.length()
 				+ this->receiverNodeId.length();
@@ -474,7 +491,6 @@ protected:
 	uint8_t closeFile;
 
 };
-
 
 class RollbackEvent: public BaseEvent {
 public:
@@ -529,8 +545,6 @@ public:
 	uint8_t getTransactionId() {
 		return this->transactionId;
 	}
-
-
 
 protected:
 	uint8_t transactionId;
@@ -606,6 +620,8 @@ private:
 	int packetLoss;
 	struct sockaddr_in groupAddr;
 	struct sockaddr_in nullAddr;
+	int packetsRead;
+	int packetsDropped;
 
 public:
 	Network(unsigned short portNum, int packetLoss) {
@@ -690,17 +706,29 @@ public:
 		return event;
 	}
 
-	void sendPacket(DfsPacket *pack) {
+	//Send packet to multicast group
+	//param pack is packet pointer to send
+	//param reliable if true try to send packet multiple times to provide given system reliability
+	// if
+	void sendPacket(DfsPacket *pack, bool reliable) {
 
-		if (sendto((int) this->s, pack->body, pack->len, 0,
-				(struct sockaddr *) &groupAddr, sizeof(groupAddr)) < 0) {
-			exitError("Cannot send a packet.\n");
-		};
+		float iterationsNum = 1;
+		if (reliable && this->packetLoss > 0) {
+			iterationsNum = 1
+					+ log(SYSTEM_RELIABILITY) / log(this->packetLoss / 100.0);
+		}
+		for (int i = 0; i < iterationsNum; i++) {
+			if (sendto((int) this->s, pack->body, pack->getLen(), 0,
+					(struct sockaddr *) &groupAddr, sizeof(groupAddr)) < 0) {
+				exitError("Cannot send a packet.\n");
+			};
+			usleep(MSECONDS_TO_SLEEP_BETWEEN_PACKETS);
+		}
 
 	}
 
-	void sendPacket(BaseEvent *event) {
-		sendPacket(event->toPacket());
+	void sendPacket(BaseEvent *event, bool reliable) {
+		sendPacket(event->toPacket(), reliable);
 	}
 
 	list<DfsPacket*> sendPacketRetry(string expectedReceiverNodeId,
@@ -716,14 +744,16 @@ public:
 					"Attempt number %d, number responses received: %d, expected to receive: %d\n",
 					i + 1, receivedNodesIds.size(), numberOfNodesExpected);
 
-			this->sendPacket(eventToSend);
+			this->sendPacket(eventToSend, false);
 
-			clock_t start_time = clock();
+			struct timeval start_time, current_time;
+			long seconds_elapsed;
+			gettimeofday(&start_time, NULL);
 
 			BaseEvent *receivedEvent;
 
 			while (receivedNodesIds.size() < numberOfNodesExpected) {
-				char body[256] = { };
+				char body[MAX_PACKET_SIZE] = { };
 				int bytes = this->readFromSocket(body, 0);
 				if (bytes > 0) {
 					DfsPacket *packet = new DfsPacket(body, bytes);
@@ -744,7 +774,11 @@ public:
 					}
 				}
 
-				if (clock() - start_time > CLOCKS_TIME_WAITING)
+				gettimeofday(&current_time, NULL);
+
+				seconds_elapsed = current_time.tv_sec - start_time.tv_sec;
+
+				if (seconds_elapsed > RETRY_WAIT_SEC)
 					break;
 
 			}
@@ -771,6 +805,12 @@ public:
 
 			bytes = recvfrom(this->s, buf, sizeof(DfsPacket), 0, addr,
 					&fromLen);
+		}
+
+		this->packetsRead++;
+		if ((rand() % 100) < this->packetLoss) {
+			this->packetsDropped++;
+			return 0;
 		}
 
 		return bytes;

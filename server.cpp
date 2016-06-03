@@ -43,7 +43,7 @@ public:
 
 		while (1) {
 
-			char body[256] = { };
+			char body[MAX_PACKET_SIZE] = { };
 			int bytes = this->network->readFromSocket(body, 0);
 			if (bytes > 0) {
 				DfsPacket *packet = new DfsPacket(body, bytes);
@@ -97,7 +97,7 @@ private:
 		BeginTransactionResponseEvent *beginTransactionEvent =
 				new BeginTransactionResponseEvent(clientId, this->getServerId(),
 						this->_transactionId);
-		this->network->sendPacket(beginTransactionEvent);
+		this->network->sendPacket(beginTransactionEvent, false);
 
 		printf("OPENFILE: %s, fd: %d, transactionId: %d\n", fileName.c_str(),
 				fd, this->_transactionId);
@@ -115,8 +115,8 @@ private:
 
 		int fd = this->transactionIdPerClient[clientId][tranId];
 		printf(
-				"WRITE BLOCK to file descriptor: %d, clientId: %s, transactionId: %d\n",
-				fd, clientId.c_str(), tranId);
+				"WRITE BLOCK to file descriptor: %d, clientId: %s, transactionId: %d, size: %d, offset: %d\n",
+				fd, clientId.c_str(), tranId, blockSize, offset);
 
 		if (lseek(fd, offset, SEEK_SET) < 0) {
 			perror("WriteBlock Seek");
@@ -125,7 +125,6 @@ private:
 		if ((write(fd, bytes, blockSize)) != blockSize) {
 			perror("WriteBlock write");
 		}
-
 	}
 
 	void processPacket(DfsPacket *packet) {
@@ -206,7 +205,7 @@ private:
 		CommitVoteEvent *event = new CommitVoteEvent(clientId,
 				this->getServerId(), transactionId, readyToCommit);
 
-		this->network->sendPacket(event);
+		this->network->sendPacket(event, true);
 
 	}
 
@@ -220,7 +219,7 @@ private:
 			CommitRollbackAckEvent *event = new CommitRollbackAckEvent(clientId,
 					this->getServerId(), transactionId);
 
-			this->network->sendPacket(event);
+			this->network->sendPacket(event, true);
 
 		} else {
 			printf("Unable to finish commit for transactionId: %d\n",
@@ -246,7 +245,7 @@ private:
 		CommitRollbackAckEvent *event = new CommitRollbackAckEvent(clientId,
 				this->getServerId(), transactionId);
 
-		this->network->sendPacket(event);
+		this->network->sendPacket(event, true);
 
 	}
 
@@ -290,7 +289,6 @@ private:
 				fileNamePerFileDescriptor[fd]);
 		string absoluteUncommittedFileName = this->getAbsolutePath(
 				this->getUncommittedFileName(transactionId, clientId));
-
 
 		this->copyContent(absoluteFileName, absoluteUncommittedFileName);
 
