@@ -766,13 +766,14 @@ public:
 	//Send packet to multicast group
 	//param pack is packet pointer to send
 	//param reliable if true try to send packet multiple times to provide given system reliability
-	// if
-	void sendPacket(DfsPacket *pack, bool reliable) {
+	//param recepientsNum number of recepients supposed to receive message
+	void sendPacket(DfsPacket *pack, bool reliable, int recepientsNum) {
 
 		float iterationsNum = 1;
 		if (reliable && this->packetLoss > 0) {
-			iterationsNum = 1
-					+ log(SYSTEM_RELIABILITY) / log(this->packetLoss / 100.0);
+			iterationsNum = log(SYSTEM_RELIABILITY)
+					/ log(this->packetLoss / 100.0)
+					- log(recepientsNum) / log(this->packetLoss / 100.0);
 		}
 		for (int i = 0; i < iterationsNum; i++) {
 			if (sendto((int) this->s, pack->body, pack->getLen(), 0,
@@ -784,8 +785,8 @@ public:
 
 	}
 
-	void sendPacket(BaseEvent *event, bool reliable) {
-		sendPacket(event->toPacket(), reliable);
+	void sendPacket(BaseEvent *event, bool reliable, int recepientsNum) {
+		sendPacket(event->toPacket(), reliable, recepientsNum);
 	}
 
 	list<DfsPacket*> sendPacketRetry(string expectedReceiverNodeId,
@@ -801,7 +802,7 @@ public:
 					"Attempt number %d, number responses received: %d, expected to receive: %d\n",
 					i + 1, receivedNodesIds.size(), numberOfNodesExpected);
 
-			this->sendPacket(eventToSend, false);
+			this->sendPacket(eventToSend, false, 1);
 
 
 

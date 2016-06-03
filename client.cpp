@@ -72,7 +72,7 @@ public:
 				it != transactionsPerServersPerFd[fd].end(); it++) {
 			WriteBlockEvent *event = new WriteBlockEvent(this->getClientId(),
 					it->first, it->second, buffer, byteOffset, blockSize);
-			this->network->sendPacket(event, true);
+			this->network->sendPacket(event, true, this->numServers);
 		}
 
 		return blockSize;
