@@ -9,18 +9,15 @@
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <cstring>
-#include <iostream>
 #include <string>
 #include <list>
 #include <set>
 #include <cmath>
 #include <unistd.h>
-
 #include <sys/time.h>
 
 using namespace std;
 
-#define DFS_PORT	44005
 #define DFSGROUP	0xe0010101
 
 #define FILENAMESIZE 128
@@ -41,7 +38,10 @@ using namespace std;
 #define NEGATIVE_VOTE 0
 #define POSITIVE_VOTE 1
 
-#define SYSTEM_RELIABILITY 1e-5
+#define TRAN_ID_ALREADY_OPENED -1
+#define FD_ALREADY_OPENED -1
+
+#define SYSTEM_RELIABILITY 1e-6
 
 #define MSECONDS_TO_SLEEP_BETWEEN_PACKETS 10000
 
@@ -50,6 +50,36 @@ using namespace std;
 void exitError(string msg) {
 	printf("%s\n", msg.c_str());
 	exit(1);
+}
+
+void intToBytes(int paramInt, uint8_t *bytes) {
+
+	static uint8_t arrayOfByte[4];
+
+	for (int i = 0; i < 4; i++) {
+
+		bytes[3 - i] = (paramInt >> 8 * i);
+
+	}
+
+}
+
+int bytesToInt(uint8_t * bytes) {
+
+	int intValue = 0;
+	intValue = (bytes[3]) | (bytes[2] << 8) | (bytes[1] << 16)
+			| (bytes[0] << 24);
+
+	return intValue;
+
+}
+
+string createString(uint8_t * bytes, int len) {
+
+	string result = string(bytes, bytes + len);
+
+	return result;
+
 }
 
 class DfsPacket {
@@ -65,13 +95,13 @@ public:
 		this->len = len;
 	}
 
-	char body[MAX_PACKET_SIZE];
-	uint8_t getLen() {
+	uint8_t body[MAX_PACKET_SIZE];
+	int getLen() {
 		return this->len;
 	}
 
 public:
-	uint8_t len;
+	int len;
 
 };
 
@@ -110,14 +140,16 @@ public:
 	BeginTransactionRequestEvent(string clientId, string fileName) {
 		this->broadcast = true;
 		this->eventType = EVENT_TYPE_BEGIN_TRANSACTION_REQUEST;
-		this->fileName = string(fileName);
+		this->fileName = fileName;
 		this->senderNodeId = clientId;
 	}
 	BeginTransactionRequestEvent(DfsPacket *packet) {
 		this->broadcast = true;
 		this->eventType = EVENT_TYPE_BEGIN_TRANSACTION_REQUEST;
-		this->fileName = string(packet->body + 1, FILENAMESIZE);
-		this->senderNodeId = string(packet->body + 2 + FILENAMESIZE);
+		this->fileName = createString(packet->body + 1, FILENAMESIZE);
+		int clientIdLength = packet->body[1 + FILENAMESIZE];
+		this->senderNodeId = createString(packet->body + 2 + FILENAMESIZE,
+				clientIdLength);
 	}
 
 	virtual DfsPacket* toPacket(void) {
@@ -126,11 +158,12 @@ public:
 		//Event type
 		pack->body[0] = this->eventType;
 		//File name
-		strncpy(pack->body + 1, this->fileName.c_str(), FILENAMESIZE);
+		memcpy(pack->body + 1, this->fileName.c_str(), FILENAMESIZE);
 		//Client id length
 		pack->body[1 + FILENAMESIZE] = this->senderNodeId.length();
 		//Client id
-		strcpy(pack->body + 2 + FILENAMESIZE, this->senderNodeId.c_str());
+		memcpy(pack->body + 2 + FILENAMESIZE, this->senderNodeId.c_str(),
+				this->senderNodeId.length());
 
 		pack->len = 2 + FILENAMESIZE + this->senderNodeId.length();
 
@@ -161,9 +194,9 @@ public:
 	BeginTransactionResponseEvent(DfsPacket *packet) {
 		this->eventType = EVENT_TYPE_BEGIN_TRANSACTION_RESPONSE;
 		int clientIdLength = packet->body[1];
-		this->receiverNodeId = string(packet->body + 2, clientIdLength);
+		this->receiverNodeId = createString(packet->body + 2, clientIdLength);
 		int serverIdLength = packet->body[2 + clientIdLength];
-		this->senderNodeId = string(packet->body + 3 + clientIdLength,
+		this->senderNodeId = createString(packet->body + 3 + clientIdLength,
 				serverIdLength);
 		this->transactionId = packet->body[3 + clientIdLength + serverIdLength];
 
@@ -177,13 +210,14 @@ public:
 		//Client id length
 		pack->body[1] = this->receiverNodeId.length();
 		//Client id
-		strcpy(pack->body + 2, this->receiverNodeId.c_str());
+		memcpy(pack->body + 2, this->receiverNodeId.c_str(),
+				this->receiverNodeId.length());
 		//Server id length
 		pack->body[2 + this->receiverNodeId.length()] =
 				this->senderNodeId.length();
 		//Server id
-		strcpy(pack->body + 3 + this->receiverNodeId.length(),
-				this->senderNodeId.c_str());
+		memcpy(pack->body + 3 + this->receiverNodeId.length(),
+				this->senderNodeId.c_str(), this->senderNodeId.length());
 		//Transaction id
 		pack->body[3 + this->receiverNodeId.length()
 				+ this->senderNodeId.length()] = this->transactionId;
@@ -210,21 +244,33 @@ public:
 
 	WriteBlockEvent(DfsPacket *packet) {
 
+
+
 		this->eventType = EVENT_TYPE_WRITE_BLOCK;
 		this->transactionId = packet->body[1];
 		int clientIdLength = packet->body[2];
-		this->senderNodeId = string(packet->body + 3, clientIdLength);
+
+		this->senderNodeId = createString(packet->body + 3, clientIdLength);
 		int serverIdLength = packet->body[3 + clientIdLength];
-		this->receiverNodeId = string(packet->body + 4 + clientIdLength,
+		this->receiverNodeId = createString(packet->body + 4 + clientIdLength,
 				serverIdLength);
-		this->offset = packet->body[4 + clientIdLength + serverIdLength];
-		this->blockSize = packet->body[5 + clientIdLength + serverIdLength];
-		this->bytes = packet->body + 6 + clientIdLength + serverIdLength;
+
+		this->offset = bytesToInt(
+				packet->body + 4 + this->senderNodeId.length()
+						+ this->receiverNodeId.length());
+
+		this->blockSize = bytesToInt(
+				packet->body + 8 + this->receiverNodeId.length()
+						+ this->senderNodeId.length());
+
+		this->bytes = new char[this->blockSize];
+		memcpy(this->bytes, packet->body + 12 + clientIdLength + serverIdLength,
+				this->blockSize);
 
 	}
 
 	WriteBlockEvent(string clientId, string serverId, uint8_t transactionId,
-			char * bytes, int offset, int blockSize) {
+			char * bytes, uint32_t offset, int blockSize) {
 
 		this->eventType = EVENT_TYPE_WRITE_BLOCK;
 		this->senderNodeId = clientId;
@@ -245,36 +291,40 @@ public:
 		//Client id length
 		pack->body[2] = this->senderNodeId.length();
 		//Client id
-		strcpy(pack->body + 3, this->senderNodeId.c_str());
+		memcpy(pack->body + 3, this->senderNodeId.c_str(),
+				this->senderNodeId.length());
 		//Server id length
 		pack->body[3 + this->senderNodeId.length()] =
 				this->receiverNodeId.length();
 		//Server id
-		strcpy(pack->body + 4 + this->senderNodeId.length(),
-				this->receiverNodeId.c_str());
+		memcpy(pack->body + 4 + this->senderNodeId.length(),
+				this->receiverNodeId.c_str(), this->receiverNodeId.length());
 		//Offset
-		pack->body[4 + this->receiverNodeId.length()
-				+ this->senderNodeId.length()] = this->offset;
+		intToBytes(this->offset,
+				pack->body + 4 + this->senderNodeId.length()
+						+ this->receiverNodeId.length());
 		//Block size
-		pack->body[5 + this->receiverNodeId.length()
-				+ this->senderNodeId.length()] = this->blockSize;
+		intToBytes(this->blockSize,
+				pack->body + 8 + this->receiverNodeId.length()
+						+ this->senderNodeId.length());
 		//Bytes
-		std::memcpy(
-				pack->body + 6 + this->receiverNodeId.length()
+		memcpy(
+				pack->body + 12 + this->receiverNodeId.length()
 						+ this->senderNodeId.length(), bytes, blockSize);
-		pack->len = 6 + this->receiverNodeId.length()
+
+		pack->len = 12 + this->receiverNodeId.length()
 				+ this->senderNodeId.length() + blockSize;
 
 		return pack;
 	}
 
-	uint8_t getBlockSize() {
+	int getBlockSize() {
 		return this->blockSize;
 	}
 	char* getBytes() {
 		return this->bytes;
 	}
-	uint8_t getOffset() {
+	uint32_t getOffset() {
 		return this->offset;
 	}
 
@@ -284,8 +334,8 @@ public:
 
 protected:
 	uint8_t transactionId;
-	uint8_t offset;
-	uint8_t blockSize;
+	uint32_t offset;
+	int blockSize;
 	char *bytes;
 
 };
@@ -297,13 +347,12 @@ public:
 	}
 
 	CommitRequestEvent(DfsPacket *packet) {
-
 		this->eventType = EVENT_TYPE_COMMIT_REQUEST;
 		this->transactionId = packet->body[1];
 		int clientIdLength = packet->body[2];
-		this->senderNodeId = string(packet->body + 3, clientIdLength);
+		this->senderNodeId = createString(packet->body + 3, clientIdLength);
 		int serverIdLength = packet->body[3 + clientIdLength];
-		this->receiverNodeId = string(packet->body + 4 + clientIdLength,
+		this->receiverNodeId = createString(packet->body + 4 + clientIdLength,
 				serverIdLength);
 
 	}
@@ -328,13 +377,14 @@ public:
 		//Client id length
 		pack->body[2] = this->senderNodeId.length();
 		//Client id
-		strcpy(pack->body + 3, this->senderNodeId.c_str());
+		memcpy(pack->body + 3, this->senderNodeId.c_str(),
+				this->senderNodeId.length());
 		//Server id length
 		pack->body[3 + this->senderNodeId.length()] =
 				this->receiverNodeId.length();
 		//Server id
-		strcpy(pack->body + 4 + this->senderNodeId.length(),
-				this->receiverNodeId.c_str());
+		memcpy(pack->body + 4 + this->senderNodeId.length(),
+				this->receiverNodeId.c_str(), this->receiverNodeId.length());
 
 		pack->len = 4 + this->senderNodeId.length()
 				+ this->receiverNodeId.length();
@@ -364,9 +414,9 @@ public:
 		this->transactionId = packet->body[1];
 		this->vote = packet->body[2];
 		int clientIdLength = packet->body[3];
-		this->receiverNodeId = string(packet->body + 4, clientIdLength);
+		this->receiverNodeId = createString(packet->body + 4, clientIdLength);
 		int serverIdLength = packet->body[4 + clientIdLength];
-		this->senderNodeId = string(packet->body + 5 + clientIdLength,
+		this->senderNodeId = createString(packet->body + 5 + clientIdLength,
 				serverIdLength);
 
 	}
@@ -393,13 +443,14 @@ public:
 		//Client id length
 		pack->body[3] = this->receiverNodeId.length();
 		//Client id
-		strcpy(pack->body + 4, this->receiverNodeId.c_str());
+		memcpy(pack->body + 4, this->receiverNodeId.c_str(),
+				this->receiverNodeId.length());
 		//Server id length
 		pack->body[4 + this->receiverNodeId.length()] =
 				this->senderNodeId.length();
 		//Server id
-		strcpy(pack->body + 5 + this->receiverNodeId.length(),
-				this->senderNodeId.c_str());
+		memcpy(pack->body + 5 + this->receiverNodeId.length(),
+				this->senderNodeId.c_str(), this->senderNodeId.length());
 
 		pack->len = 5 + this->receiverNodeId.length()
 				+ this->senderNodeId.length();
@@ -432,9 +483,9 @@ public:
 		this->eventType = EVENT_TYPE_COMMIT;
 		this->transactionId = packet->body[1];
 		int clientIdLength = packet->body[2];
-		this->senderNodeId = string(packet->body + 3, clientIdLength);
+		this->senderNodeId = createString(packet->body + 3, clientIdLength);
 		int serverIdLength = packet->body[3 + clientIdLength];
-		this->receiverNodeId = string(packet->body + 4 + clientIdLength,
+		this->receiverNodeId = createString(packet->body + 4 + clientIdLength,
 				serverIdLength);
 		this->closeFile = packet->body[4 + clientIdLength + serverIdLength];
 	}
@@ -461,13 +512,14 @@ public:
 		//Client id length
 		pack->body[2] = this->senderNodeId.length();
 		//Client id
-		strcpy(pack->body + 3, this->senderNodeId.c_str());
+		memcpy(pack->body + 3, this->senderNodeId.c_str(),
+				this->senderNodeId.length());
 		//Server id length
 		pack->body[3 + this->senderNodeId.length()] =
 				this->receiverNodeId.length();
 		//Server id
-		strcpy(pack->body + 4 + this->senderNodeId.length(),
-				this->receiverNodeId.c_str());
+		memcpy(pack->body + 4 + this->senderNodeId.length(),
+				this->receiverNodeId.c_str(), this->receiverNodeId.length());
 		//Close file
 		pack->body[4 + this->senderNodeId.length()
 				+ this->receiverNodeId.length()] = this->closeFile;
@@ -502,9 +554,9 @@ public:
 		this->eventType = EVENT_TYPE_ROLLBACK;
 		this->transactionId = packet->body[1];
 		int clientIdLength = packet->body[2];
-		this->senderNodeId = string(packet->body + 3, clientIdLength);
+		this->senderNodeId = createString(packet->body + 3, clientIdLength);
 		int serverIdLength = packet->body[3 + clientIdLength];
-		this->receiverNodeId = string(packet->body + 4 + clientIdLength,
+		this->receiverNodeId = createString(packet->body + 4 + clientIdLength,
 				serverIdLength);
 	}
 
@@ -528,13 +580,14 @@ public:
 		//Client id length
 		pack->body[2] = this->senderNodeId.length();
 		//Client id
-		strcpy(pack->body + 3, this->senderNodeId.c_str());
+		memcpy(pack->body + 3, this->senderNodeId.c_str(),
+				this->senderNodeId.length());
 		//Server id length
 		pack->body[3 + this->senderNodeId.length()] =
 				this->receiverNodeId.length();
 		//Server id
-		strcpy(pack->body + 4 + this->senderNodeId.length(),
-				this->receiverNodeId.c_str());
+		memcpy(pack->body + 4 + this->senderNodeId.length(),
+				this->receiverNodeId.c_str(), this->receiverNodeId.length());
 
 		pack->len = 4 + this->senderNodeId.length()
 				+ this->receiverNodeId.length();
@@ -562,9 +615,9 @@ public:
 		this->eventType = EVENT_TYPE_COMMIT_ROLLBACK_ACK;
 		this->transactionId = packet->body[1];
 		int clientIdLength = packet->body[2];
-		this->receiverNodeId = string(packet->body + 3, clientIdLength);
+		this->receiverNodeId = createString(packet->body + 3, clientIdLength);
 		int serverIdLength = packet->body[3 + clientIdLength];
-		this->senderNodeId = string(packet->body + 4 + clientIdLength,
+		this->senderNodeId = createString(packet->body + 4 + clientIdLength,
 				serverIdLength);
 
 	}
@@ -589,13 +642,14 @@ public:
 		//Client id length
 		pack->body[2] = this->receiverNodeId.length();
 		//Client id
-		strcpy(pack->body + 3, this->receiverNodeId.c_str());
+		memcpy(pack->body + 3, this->receiverNodeId.c_str(),
+				this->receiverNodeId.length());
 		//Server id length
 		pack->body[3 + this->receiverNodeId.length()] =
 				this->senderNodeId.length();
 		//Server id
-		strcpy(pack->body + 4 + this->receiverNodeId.length(),
-				this->senderNodeId.c_str());
+		memcpy(pack->body + 4 + this->receiverNodeId.length(),
+				this->senderNodeId.c_str(), this->senderNodeId.length());
 
 		pack->len = 4 + this->receiverNodeId.length()
 				+ this->senderNodeId.length();
@@ -670,6 +724,9 @@ public:
 	}
 
 	BaseEvent* packetToEvent(DfsPacket *packet) {
+
+
+
 		uint8_t eventType = packet->body[0];
 		BaseEvent *event;
 
@@ -746,24 +803,42 @@ public:
 
 			this->sendPacket(eventToSend, false);
 
+
+
 			struct timeval start_time, current_time;
 			long seconds_elapsed;
 			gettimeofday(&start_time, NULL);
 
 			BaseEvent *receivedEvent;
 
+
 			while (receivedNodesIds.size() < numberOfNodesExpected) {
+
+
+
 				char body[MAX_PACKET_SIZE] = { };
+
+
 				int bytes = this->readFromSocket(body, 0);
+
+
+
 				if (bytes > 0) {
+
+
 					DfsPacket *packet = new DfsPacket(body, bytes);
 
+
+
 					receivedEvent = this->packetToEvent(packet);
+
+
 
 					if (receivedEvent->getReceiverNodeId()
 							== expectedReceiverNodeId
 							&& receivedEvent->getEventType()
 									== expectedEventType) {
+
 
 						if (receivedNodesIds.count(
 								receivedEvent->getSenderNodeId()) == 0) {
@@ -783,10 +858,12 @@ public:
 
 			}
 
+
 			if (receivedNodesIds.size() == numberOfNodesExpected)
 				break;
 
 		}
+
 		return packets;
 	}
 

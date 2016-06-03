@@ -8,19 +8,11 @@
 #define DEBUG
 
 #include <stdio.h>
-
 #include <server.h>
-#include <unistd.h>
 #include <fcntl.h>
-
-#include <iostream>
 #include <fstream>
-
 #include <map>
-
-#include <string.h>
 #include <sstream>
-
 #include <sys/stat.h>
 
 /* ------------------------------------------------------------------ */
@@ -78,7 +70,7 @@ private:
 	map<int, string> fileNamePerFileDescriptor;
 	uint8_t _transactionId;
 
-	uint8_t beginTransaction(string clientId, string fileName) {
+	void beginTransaction(string clientId, string fileName) {
 
 		string uncommittedFileName = this->getUncommittedFileName(
 				this->_transactionId, clientId);
@@ -102,11 +94,11 @@ private:
 		printf("OPENFILE: %s, fd: %d, transactionId: %d\n", fileName.c_str(),
 				fd, this->_transactionId);
 
-		return this->_transactionId++;
+		this->_transactionId++;
 	}
 
 	void writeBlock(uint8_t tranId, string clientId, string serverId,
-			uint8_t offset, uint8_t blockSize, char* bytes) {
+			int offset, int blockSize, char* bytes) {
 
 		if (this->transactionIdPerClient[clientId].count(tranId) == 0) {
 			printf("Invalid transaction, id: %d\n", tranId);
@@ -159,10 +151,8 @@ private:
 
 			switch (eventType) {
 			case EVENT_TYPE_BEGIN_TRANSACTION_REQUEST:
-				uint8_t transactionId;
-				transactionId =
-						beginTransaction(event->getSenderNodeId(),
-								((BeginTransactionRequestEvent *) event)->getFileName());
+				beginTransaction(event->getSenderNodeId(),
+						((BeginTransactionRequestEvent *) event)->getFileName());
 				break;
 			case EVENT_TYPE_WRITE_BLOCK:
 
@@ -270,19 +260,20 @@ private:
 				printf("Unable to close file, probably already closed\n");
 				return ErrorReturn;
 			}
-			flushChanges(fd, transactionId, clientId);
+			flushChanges(fd, transactionId, clientId, closeFile);
 
 			//Delete info about transaction
 			transactionIdPerClient[clientId].erase(transactionId);
 			fileNamePerFileDescriptor.erase(fd);
 
 		} else
-			flushChanges(fd, transactionId, clientId);
+			flushChanges(fd, transactionId, clientId, closeFile);
 
 		return NormalReturn;
 	}
 
-	void flushChanges(int fd, uint8_t transactionId, string clientId) {
+	void flushChanges(int fd, uint8_t transactionId, string clientId,
+			bool closeFile) {
 
 		//Flush changes to filesystem
 		string absoluteFileName = this->getAbsolutePath(
@@ -293,6 +284,14 @@ private:
 		this->copyContent(absoluteFileName, absoluteUncommittedFileName);
 
 		chmod(absoluteFileName.c_str(), S_IRWXU | S_IRWXG | S_IROTH);
+
+		if (closeFile) {
+			int unlinkStatus = unlink(absoluteUncommittedFileName.c_str());
+			if (unlinkStatus != 0)
+				printf("Unable to unlink temp file: %s\n",
+						absoluteUncommittedFileName.c_str());
+		}
+
 	}
 
 	string getUncommittedFileName(uint8_t transactionId, string clientId) {

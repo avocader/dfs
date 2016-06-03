@@ -8,14 +8,8 @@
 #define DEBUG
 
 #include <stdio.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include <unistd.h>
 #include <assert.h>
-#include <string.h>
 #include <sstream>
-#include <list>
 #include <map>
 
 #include <client.h>
@@ -267,8 +261,7 @@ int WriteBlock(int fd, char * buffer, int byteOffset, int blockSize) {
 	ASSERT( blockSize >= 0 && blockSize < MaxBlockLength);
 
 #ifdef DEBUG
-	printf("WRITEBLOCK: Writing FD=%d, Offset=%d, Length=%d\n", fd, byteOffset,
-			blockSize);
+	printf("WRITEBLOCK: Writing FD=%d, Offset=%d, Length=%d\n", fd, byteOffset,blockSize);
 #endif
 
 	bytesWritten = c->writeBlock(fd, buffer, byteOffset, blockSize);
