@@ -78,40 +78,65 @@ private:
 				uncommittedFileName);
 
 		BeginTransactionResponseEvent *beginTransactionEvent;
+		int fd;
+		bool alreadyOpened = false;
+		bool transactionFound = false;
+		uint8_t currentTransactionId;
 
-		map<int, string>::iterator it;
+		//Check if file already opened by any client
+		map<int, string>::iterator it_fd;
+		for (it_fd = fileNamePerFileDescriptor.begin();
+				it_fd != fileNamePerFileDescriptor.end(); it_fd++) {
+			if (strcmp(it_fd->second.c_str(), fileName.c_str()) == 0) {
 
-		for (it = fileNamePerFileDescriptor.begin();
-				it != fileNamePerFileDescriptor.end(); it++) {
-			if (strcmp(it->second.c_str(), fileName.c_str()) == 0){
-				printf("File %s already opened\n", fileName.c_str());
-				beginTransactionEvent = new BeginTransactionResponseEvent(
-						clientId, this->getServerId(), this->_transactionId,
-						RC_FILE_ALREADY_OPENED);
-				this->network->sendPacket(beginTransactionEvent, false, 1);
-				return;
+				fd = it_fd->first;
+				alreadyOpened = true;
 			}
-
 		}
 
-		int fd = open(uncommittedFileNameAbsolute.c_str(), O_WRONLY | O_CREAT,
-				S_IRWXU | S_IRWXG);
+		//Check if file already opened by this client
+		if (alreadyOpened) {
+			map<uint8_t, int>::iterator it_tr;
+			for (it_tr = transactionIdPerClient[clientId].begin();
+					it_tr != transactionIdPerClient[clientId].end(); it_tr++) {
+				if (it_tr->second == fd) {
+					currentTransactionId = it_tr->first;
+					transactionFound = true;
+				}
+			}
+		}
 
-		this->copyContent(uncommittedFileNameAbsolute,
-				this->getAbsolutePath(fileName));
+		//File already opened by other client
+		if (alreadyOpened && !transactionFound) {
+			beginTransactionEvent = new BeginTransactionResponseEvent(clientId,
+					this->getServerId(), NO_TRAN_ID, RC_FILE_ALREADY_OPENED);
+			this->network->sendPacket(beginTransactionEvent, false, 1);
 
-		transactionIdPerClient[clientId][this->_transactionId] = fd;
-		fileNamePerFileDescriptor[fd] = fileName;
+		} else if (transactionFound) {
+			beginTransactionEvent = new BeginTransactionResponseEvent(clientId,
+					this->getServerId(), currentTransactionId, RC_SUCCESS);
+			this->network->sendPacket(beginTransactionEvent, false, 1);
 
-		beginTransactionEvent =
-				new BeginTransactionResponseEvent(clientId, this->getServerId(),
-						this->_transactionId, RC_SUCCESS);
-		this->network->sendPacket(beginTransactionEvent, false, 1);
+		} else {
 
-		printf("OPENFILE: %s, fd: %d, transactionId: %d\n", fileName.c_str(),
-				fd, this->_transactionId);
+			fd = open(uncommittedFileNameAbsolute.c_str(), O_WRONLY | O_CREAT,
+					S_IRWXU | S_IRWXG);
 
-		this->_transactionId++;
+			this->copyContent(uncommittedFileNameAbsolute,
+					this->getAbsolutePath(fileName));
+
+			transactionIdPerClient[clientId][this->_transactionId] = fd;
+			fileNamePerFileDescriptor[fd] = fileName;
+
+			beginTransactionEvent = new BeginTransactionResponseEvent(clientId,
+					this->getServerId(), this->_transactionId, RC_SUCCESS);
+			this->network->sendPacket(beginTransactionEvent, false, 1);
+
+			printf("OPENFILE: %s, fd: %d, transactionId: %d\n",
+					fileName.c_str(), fd, this->_transactionId);
+
+			this->_transactionId++;
+		}
 	}
 
 	void writeBlock(uint8_t tranId, string clientId, string serverId,

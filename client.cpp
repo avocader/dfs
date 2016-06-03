@@ -54,13 +54,41 @@ public:
 
 			if (event->getReturnCode() == RC_SUCCESS) {
 
-				transactionsPerServersPerFd[fileDescriptorCounter][event->getSenderNodeId()] =
-						event->getTransactionId();
+				//Check whether transaction and fd already exist
+				map<int, map<string, uint8_t> >::iterator it_fd;
+				map<string, uint8_t>::iterator it_server;
+				int current_fd;
+				bool transactionFound = false;
+				for (it_fd = transactionsPerServersPerFd.begin();
+						it_fd != transactionsPerServersPerFd.end(); it_fd++) {
+					current_fd = it_fd->first;
+					for (it_server =
+							transactionsPerServersPerFd[current_fd].begin();
+							it_server
+									!= transactionsPerServersPerFd[current_fd].end()
+									&& !transactionFound; it_server++) {
+						//
+						if (it_server->second == event->getTransactionId()) {
+							transactionFound = true;
+							break;
+						}
 
-				printf("Server %s opened transaction %d, file descriptor %d\n",
-						event->getSenderNodeId().c_str(),
-						event->getTransactionId(), fileDescriptorCounter);
-				return fileDescriptorCounter++;
+					}
+				}
+				if (transactionFound) {
+					return current_fd;
+				} else {
+
+					transactionsPerServersPerFd[fileDescriptorCounter][event->getSenderNodeId()] =
+							event->getTransactionId();
+
+					printf(
+							"Server %s opened transaction %d, file descriptor %d\n",
+							event->getSenderNodeId().c_str(),
+							event->getTransactionId(), fileDescriptorCounter);
+					return fileDescriptorCounter++;
+				}
+
 			} else {
 
 				return ErrorReturn;
@@ -69,7 +97,6 @@ public:
 		}
 
 	}
-	;
 
 	int writeBlock(int fd, char * buffer, int byteOffset, int blockSize) {
 

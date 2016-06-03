@@ -53,6 +53,9 @@ using namespace std;
 //Desired probability of error in system
 #define SYSTEM_RELIABILITY 1e-6
 
+//
+#define NO_TRAN_ID 0
+
 void exitError(string msg) {
 	printf("%s\n", msg.c_str());
 	exit(1);
